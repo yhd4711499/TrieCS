@@ -5,9 +5,10 @@ using System.Linq;
 
 // ReSharper disable UnusedAutoPropertyAccessor.Global
 // ReSharper disable MemberCanBePrivate.Global
+// ReSharper disable PossibleMultipleEnumeration
 namespace TrieCS
 {
-    internal class ExampleContet
+    class ExampleContet
     {
         public string Name { get; set; }
 
@@ -22,6 +23,16 @@ namespace TrieCS
             },
             new ExampleContet
             {
+                Name = "ins",
+                Content = "s sin dins"
+            },
+            new ExampleContet
+            {
+                Name = "ab",
+                Content = "abc dab"
+            },
+            new ExampleContet
+            {
                 Name = "blank",
                 Content = ""
             }
@@ -30,19 +41,47 @@ namespace TrieCS
 
     public class PerfInfo
     {
-        public double FilterAddMs { get; internal set; }
-        public double ConvertMs { get; internal set; }
+        public double FilterOutMs { get; internal set; }
         public double TotalMs { get; internal set; }
+
+        public override string ToString()
+        {
+            return String.Format("Total:{0:0.00000}ms, FilterAdd:{1:0.00000}ms",
+                TotalMs,
+                FilterOutMs);
+        }
     }
 
+    /// <summary>
+    /// Grouped result of all <see cref="MatchInfo"/> with the same index.
+    /// </summary>
     public class SearchResult : IComparable<SearchResult>
     {
+        /// <summary>
+        /// index in the <see cref="TrieSearch.Keywords"/> of a <see cref="TrieSearch"/>
+        /// </summary>
         public int Index { get; set; }
+        /// <summary>
+        /// positions of matched chars in <see cref="Content"/>
+        /// </summary>
         public SortedList<int, int> Positions { get; private set; }
+        /// <summary>
+        /// how excactly it matchs the query
+        /// </summary>
         public int Priority { get; set; }
-
+        /// <summary>
+        /// 
+        /// </summary>
         public string Content { get; set; }
 
+// ReSharper disable once UnusedMember.Global
+        public string PositionString
+        {
+            get
+            {
+                return String.Join(",", Positions.Values);
+            }
+        }
 
         public SearchResult()
         {
@@ -55,12 +94,26 @@ namespace TrieCS
         }
     }
 
-
-    public class MatchInfo
+    /// <summary>
+    /// Result of an single matched char
+    /// </summary>
+    class MatchInfo
     {
+        /// <summary>
+        /// index in the <see cref="TrieSearch.Keywords"/> of a <see cref="TrieSearch"/>
+        /// </summary>
         public int Index { get; set; }
+        /// <summary>
+        /// position the this char in a string
+        /// </summary>
         public int Position { get; set; }
+        /// <summary>
+        /// 
+        /// </summary>
         public int Priority { get; set; }
+        /// <summary>
+        /// the char content
+        /// </summary>
         public char Data { get; set; }
 
         public override string ToString()
@@ -73,10 +126,9 @@ namespace TrieCS
     {
         public char Data { get; set; }
         public List<MatchInfo> Infos { get; private set; }
-        public Dictionary<char, Node> Next { get; private set; }
+
         public Node()
         {
-            Next = new Dictionary<char, Node>(26);
             Infos = new List<MatchInfo>();
         }
         public override string ToString()
@@ -85,77 +137,180 @@ namespace TrieCS
         }
     }
 
+    /// <summary>
+    /// 
+    /// </summary>
     class TrieSearch
     {
-        const string Alphabet = "abcdefghijklmnopqrstuvwxyz";
-
-        private readonly HiPerfTimer _timer = new HiPerfTimer();
-
         public PerfInfo LastPerfInfo { get; private set; }
+        public Dictionary<char, Node> Nodes { get; private set; }
 
-        public Node Root { get; private set; }
+/*
+        Dictionary<int, int> _lastPosition;
+*/
 
         private string[] _keywords;
+        /// <summary>
+        /// the contents from which you may want to search.
+        /// <para/>setting this value will immidietly build the trie.
+        /// </summary>
         public string[] Keywords
         {
             get { return _keywords; }
             set
             {
                 _keywords = value;
-                Root = new Node();
+                Nodes = new Dictionary<char, Node>();
 
                 for (var i = 0; i < _keywords.Length; i++)
                 {
-                    BuildTree(Root, _keywords[i], i);
+                    BuildTree(_keywords[i], i);
                 }
             }
         }
 
-        private static void BuildTree(Node root, string keyword, int index)
+        /// <summary>
+        /// build the tree.
+        /// </summary>
+        /// <param name="keyword"></param>
+        /// <param name="index">index of the keyword in <see cref="Keywords"/></param>
+        private void BuildTree(string keyword, int index)
         {
-            var parents = new Stack<Node>();
-            var node = root;
             for (var j = 0; j < keyword.Length; j++)
             {
-                parents.Push(node);
-
                 var c = keyword[j];
-
+                if (!Char.IsLetter(c)) continue;
                 var info = new MatchInfo
                 {
                     Index = index,
                     Position = j,
-                    Priority = j == 0 ? 2 : 1,
+                    Priority = j == 0 ? 3 : 1,  // start char has a higher priority
                     Data = c,
                 };
 
                 if (Char.IsUpper(c))
-                    info.Priority += 1;
+                    info.Priority += 2;
 
                 c = Char.ToLower(c);
 
                 Node newNode;
-                if (!node.Next.TryGetValue(c, out newNode))
+                if (!Nodes.TryGetValue(c, out newNode))
                 {
                     newNode = new Node { Data = c };
-                    node.Next[c] = newNode;
+
+                    Nodes[c] = newNode;
                 }
                 newNode.Infos.Add(info);
-
-                node = newNode;
             }
         }
 
-        public SearchResult[] Search(string data)
+        public SearchResult[] Search(string query)
         {
             LastPerfInfo = new PerfInfo();
-            var infoList = new Dictionary<int, SearchResult>();
-            SearchIter(data, 0, Root, null, infoList);
-            foreach (var item in infoList.Values.Where(item => Continues(item.Positions.Values)))
+            //_lastPosition = new Dictionary<int, int>();
+
+            if (Keywords.Length == 0)
+                return new SearchResult[0];
+
+            var timer = HiPerfTimer.StartNew();
+            var resultList = new Dictionary<int, SearchResult>();
+            //var found = new Dictionary<int, bool>();
+
+            for (int pos = 0; pos < query.Length; pos++)
             {
-                item.Priority += 2;
+                var c = query[pos];
+                Node node;
+                if (!Nodes.TryGetValue(c, out node))
+                {
+                    resultList.Clear();
+                    break;
+                }
+
+                FilterOut(resultList, node);
+
+                node.Infos.ForEach(info =>
+                {
+                    var index = info.Index;
+                    if (pos != 0)
+                    {
+                        if (!resultList.ContainsKey(index))
+                        {
+                            resultList.Remove(index);
+                            return;
+                        }
+                        /*else
+                        {
+                            if (info.Position > _lastPosition[index])
+                            {
+                                found[index] = true;
+                                _lastPosition[index] = info.Position;
+                            }
+                            else
+                            {
+                                found[index] = false;
+                            }
+                        }*/
+                    }
+                    /*else
+                    {
+                        if (!_lastPosition.ContainsKey(index))
+                            _lastPosition[index] = info.Position;
+                        found[index] = true;
+                    }*/
+                    AddToResult(resultList, info, index);
+                });
             }
-            return infoList.Values.ToArray();
+
+            /*foreach (var item in found.Where(_=>!_.Value).Select(_=>_.Key))
+            {
+                resultList.Remove(item);
+            }*/
+
+            // increase priority if continues.
+            var resultArray = PostProcess(resultList);
+
+            timer.Stop();
+            LastPerfInfo.TotalMs = timer.Duration;
+
+            return resultArray;
+        }
+
+        private static void FilterOut(Dictionary<int, SearchResult> resultList, Node node)
+        {
+            var lookup = node.Infos.ToLookup(_ => _.Index);
+            var dif = resultList.Select(_ => _.Key).Where(_ => !lookup.Contains(_)).ToList();
+            dif.ForEach(_ => resultList.Remove(_));
+        }
+
+        private static SearchResult[] PostProcess(Dictionary<int, SearchResult> resultList)
+        {
+            var resultArray = resultList.Values.ToArray();
+            foreach (var item in resultArray)
+            {
+                if (Continues(item.Positions.Values))
+                    item.Priority += 4;
+            }
+            return resultArray;
+        }
+
+        private void AddToResult(Dictionary<int, SearchResult> resultList, MatchInfo info, int index)
+        {
+            SearchResult sr;
+            if (!resultList.TryGetValue(info.Index, out sr))
+            {
+                sr = new SearchResult
+                {
+                    Index = index
+                };
+                resultList[index] = sr;
+            }
+            sr.Content = Keywords[index];
+            if (!sr.Positions.ContainsKey(info.Position))
+            {
+                sr.Positions.Add(info.Position, info.Position);
+                if (info.Priority > sr.Priority)
+                    sr.Priority = info.Priority;
+            }
         }
 
         /// <summary>
@@ -166,73 +321,27 @@ namespace TrieCS
         private static bool Continues(IEnumerable<int> list)
         {
             var last = list.ElementAt(0);
+            var threshold = 3;
+            var found = false;
             foreach (var item in list.Skip(1))
             {
                 if (item != last + 1)
-                    return false;
+                {
+                    threshold = 3;
+                    last = item;
+                    found = false;
+                    continue;
+                }
                 last = item;
+                threshold--;
+                found = true;
+                if (threshold == 0)
+                    return true;
             }
-            return true;
-        }
-
-        private bool SearchIter(string data, int pos, Node node, ILookup<int, int> range, IDictionary<int, SearchResult> infoList)
-        {
-            if (node == null) return false;
-
-            var result = false;
-
-            for (; pos < data.Length; pos++)
-            {
-                var c = data[pos];
-                var lastNode = node;
-
-                result = node.Next.TryGetValue(c, out node);
-
-                if (result)
-                {
-                    node.Infos.ForEach(info =>
-                    {
-                        var index = info.Index;
-                        SearchResult sr;
-                        if (!infoList.TryGetValue(info.Index, out sr))
-                        {
-                            sr = new SearchResult();
-                            infoList[index] = sr;
-                        }
-                        sr.Content = Keywords[index];
-                        if (!sr.Positions.ContainsKey(info.Position))
-                        {
-                            sr.Positions.Add(info.Position, info.Position);
-                            sr.Priority += info.Priority;
-                        }
-
-                    });
-                }
-                else
-                {
-                    foreach (var item in lastNode.Infos)
-                    {
-                        infoList.Remove(item.Index);
-                    }
-
-                    node = lastNode;
-                }
-
-                Node nextSearchNode = null;
-
-                result = Alphabet.Where(nc => nc != c).Where(nc => lastNode.Next.TryGetValue(nc, out nextSearchNode) && (range == null || nextSearchNode.Infos.Any(_ => range.Contains(_.Index))))
-                    .Select(nc => SearchIter(data, pos, nextSearchNode, range, infoList))
-                    .Aggregate(result, (current, newResult) => current || newResult);
-
-                range = infoList.Select(_ => _.Key).ToLookup(_ => _);
-
-                if (result) continue;
-
-                break;
-            }
-            return result;
+            return found;
         }
     }
 }
+// ReSharper restore PossibleMultipleEnumeration
 // ReSharper restore MemberCanBePrivate.Global
 // ReSharper restore UnusedAutoPropertyAccessor.Global

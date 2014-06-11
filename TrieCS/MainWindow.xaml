@@ -5,7 +5,7 @@
     <Grid>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*"/>
-            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="150"/>
         </Grid.ColumnDefinitions>
         <Grid Margin="0,0,4,0">
             <Grid.RowDefinitions>
@@ -14,15 +14,15 @@
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
-            <TextBox x:Name="content" Grid.Row="0" TextChanged="content_TextChanged_1" AcceptsReturn="True" Text="{Binding SelectedItem.Content,ElementName=ExampleListBox, Mode=OneWay}" TextWrapping="Wrap"/>
+            <TextBox VerticalScrollBarVisibility="Auto" x:Name="content" Grid.Row="0" TextChanged="content_TextChanged_1" AcceptsReturn="True" Text="{Binding SelectedItem.Content,ElementName=ExampleListBox, Mode=OneWay}" TextWrapping="Wrap"/>
             <TextBox x:Name="keyword" Grid.Row="1" TextChanged="keyword_TextChanged_1" Height="24"/>
             <ListView x:Name="result" Grid.Row="2" Grid.Column="0">
                 <ListView.View>
                     <GridView>
                         <GridViewColumn Width="50" DisplayMemberBinding="{Binding Priority}" Header="匹配度" />
                         <GridViewColumn Width="50" DisplayMemberBinding="{Binding Index}" Header="序号" />
-                        <!--<GridViewColumn Width="50" DisplayMemberBinding="{Binding Position}" Header="位置" />-->
                         <GridViewColumn Width="250" DisplayMemberBinding="{Binding Content}" Header="内容" />
+                        <GridViewColumn Width="140" DisplayMemberBinding="{Binding PositionString}" Header="位置" />
                     </GridView>
                 </ListView.View>
             </ListView>
@@ -38,16 +38,12 @@
             <ListBox
                 x:Name="ExampleListBox"
                 DisplayMemberPath="Name"></ListBox>
-            <TreeView
+            <ListBox
                 x:Name="NodesTreeView"
                 HorizontalContentAlignment="Stretch"
-                Grid.Row="1">
-                <TreeView.ItemTemplate>
-                    <HierarchicalDataTemplate ItemsSource="{Binding Value.Next}">
-                        <TextBlock Text="{Binding Value.Data}"></TextBlock>
-                    </HierarchicalDataTemplate>
-                </TreeView.ItemTemplate>
-            </TreeView>
+                Grid.Row="1"
+                DisplayMemberPath="Value">
+            </ListBox>
             <ListBox
                 DataContext="{Binding Path=SelectedItem, ElementName=NodesTreeView}"
                 ItemsSource="{Binding Value.Infos}"

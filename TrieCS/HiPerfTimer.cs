@@ -3,9 +3,10 @@
  * 
  *  (Thanks to the author!)
  */
-
+using System;
 using System.Runtime.InteropServices;
 using System.ComponentModel;
+using System.Threading;
 
 namespace TrieCS
 {
@@ -15,30 +16,38 @@ namespace TrieCS
         private static extern bool QueryPerformanceCounter(out long lpPerformanceCount);
         [DllImport("Kernel32.dll")]
         private static extern bool QueryPerformanceFrequency(out long lpFrequency);
-        private long _startTime;
-        private long _stopTime;
-        private long _freq;
+        private long startTime;
+        private long stopTime;
+        private long freq;
         /// <summary>
         /// ctor
         /// </summary>
         public HiPerfTimer()
         {
-            _startTime = 0;
-            _stopTime = 0;
-            _freq = 0;
-            if (QueryPerformanceFrequency(out _freq) == false)
+            startTime = 0;
+            stopTime = 0;
+            freq = 0;
+            if (QueryPerformanceFrequency(out freq) == false)
             {
                 throw new Win32Exception(); // timer not supported
             }
         }
+
+        public static HiPerfTimer StartNew()
+        {
+            var t = new HiPerfTimer();
+            t.Start();
+            return t;
+        }
+
         /// <summary>
         /// Start the timer
         /// </summary>
         /// <returns>long - tick count</returns>
         public long Start()
         {
-            QueryPerformanceCounter(out _startTime);
-            return _startTime;
+            QueryPerformanceCounter(out startTime);
+            return startTime;
         }
         /// <summary>
         /// Stop timer 
@@ -46,18 +55,18 @@ namespace TrieCS
         /// <returns>long - tick count</returns>
         public long Stop()
         {
-            QueryPerformanceCounter(out _stopTime);
-            return _stopTime;
+            QueryPerformanceCounter(out stopTime);
+            return stopTime;
         }
         /// <summary>
-        /// Return the duration of the timer (in seconds)
+        /// Return the duration of the timer (in milliseconds)
         /// </summary>
         /// <returns>double - duration</returns>
         public double Duration
         {
             get
             {
-                return (_stopTime - _startTime) / (double)_freq;
+                return (double)(stopTime - startTime) / (double)freq * 1000.0;
             }
         }
         /// <summary>
@@ -68,8 +77,8 @@ namespace TrieCS
         {
             get
             {
-                QueryPerformanceFrequency(out _freq);
-                return _freq;
+                QueryPerformanceFrequency(out freq);
+                return freq;
             }
         }
     }
