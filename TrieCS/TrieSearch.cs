@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
+using System.Threading.Tasks;
 
 // ReSharper disable UnusedAutoPropertyAccessor.Global
 // ReSharper disable MemberCanBePrivate.Global
@@ -39,6 +41,9 @@ namespace TrieCS
         };
     }
 
+    /// <summary>
+    /// Performance info
+    /// </summary>
     public class PerfInfo
     {
         public double FilterOutMs { get; internal set; }
@@ -74,7 +79,7 @@ namespace TrieCS
         /// </summary>
         public string Content { get; set; }
 
-// ReSharper disable once UnusedMember.Global
+        // ReSharper disable once UnusedMember.Global
         public string PositionString
         {
             get
@@ -122,9 +127,18 @@ namespace TrieCS
         }
     }
 
+    /// <summary>
+    /// Trie node
+    /// </summary>
     class Node
     {
+        /// <summary>
+        /// Char content. Only for data visualization.
+        /// </summary>
         public char Data { get; set; }
+        /// <summary>
+        /// All <see cref="MatchInfo"/> of this node.
+        /// </summary>
         public List<MatchInfo> Infos { get; private set; }
 
         public Node()
@@ -142,12 +156,15 @@ namespace TrieCS
     /// </summary>
     class TrieSearch
     {
+        /// <summary>
+        /// Performance info of the last search.
+        /// </summary>
         public PerfInfo LastPerfInfo { get; private set; }
-        public Dictionary<char, Node> Nodes { get; private set; }
 
-/*
-        Dictionary<int, int> _lastPosition;
-*/
+        /// <summary>
+        /// All nodes in this trie.
+        /// </summary>
+        public Dictionary<char, Node> Nodes { get; private set; }
 
         private string[] _keywords;
         /// <summary>
@@ -157,66 +174,89 @@ namespace TrieCS
         public string[] Keywords
         {
             get { return _keywords; }
-            set
-            {
-                _keywords = value;
-                Nodes = new Dictionary<char, Node>();
+        }
 
-                for (var i = 0; i < _keywords.Length; i++)
+        /// <summary>
+        /// Build the trie. A simple async wrapper for <see cref="BuildTree"/>
+        /// </summary>
+        /// <param name="contents"></param>
+        /// <returns></returns>
+        public Task BuildTreeAsync(string[] contents)
+        {
+            return Task.Run(() => BuildTree(contents));
+        }
+
+        /// <summary>
+        /// Search. A simple async wrapper for <see cref="Search"/>
+        /// </summary>
+        /// <param name="query"></param>
+        /// <returns>Matched results</returns>
+        public Task<SearchResult[]> SearchAsync(string query)
+        {
+            return Task.Run(() => Search(query));
+        }
+
+        /// <summary>
+        /// build the tree.
+        /// <param name="contents"></param>
+        /// </summary>
+        public void BuildTree(string[] contents)
+        {
+            GC.Collect();
+            _keywords = contents;
+            Nodes = new Dictionary<char, Node>();
+            for (var i = 0; i < contents.Length; i++)
+            {
+                var keyword = contents[i];
+                for (var j = 0; j < keyword.Length; j++)
                 {
-                    BuildTree(_keywords[i], i);
+                    var c = keyword[j];
+                    if (!Char.IsLetter(c)) continue;
+                    var info = new MatchInfo
+                    {
+                        Index = i,
+                        Position = j,
+                        Priority = j == 0 ? 3 : 1,  // initial char has a higher priority
+                        Data = c,
+                    };
+
+                    // Capital char has a higher priority.
+                    if (Char.IsUpper(c))
+                        info.Priority += 2;
+
+                    // Only lower char is accepted.
+                    c = Char.ToLower(c);
+
+                    Node newNode;
+                    if (!Nodes.TryGetValue(c, out newNode))
+                    {
+                        newNode = new Node { Data = c };
+                        Nodes[c] = newNode;
+                    }
+
+                    // Record this match info.
+                    newNode.Infos.Add(info);
                 }
             }
         }
 
         /// <summary>
-        /// build the tree.
+        /// Search
         /// </summary>
-        /// <param name="keyword"></param>
-        /// <param name="index">index of the keyword in <see cref="Keywords"/></param>
-        private void BuildTree(string keyword, int index)
-        {
-            for (var j = 0; j < keyword.Length; j++)
-            {
-                var c = keyword[j];
-                if (!Char.IsLetter(c)) continue;
-                var info = new MatchInfo
-                {
-                    Index = index,
-                    Position = j,
-                    Priority = j == 0 ? 3 : 1,  // start char has a higher priority
-                    Data = c,
-                };
-
-                if (Char.IsUpper(c))
-                    info.Priority += 2;
-
-                c = Char.ToLower(c);
-
-                Node newNode;
-                if (!Nodes.TryGetValue(c, out newNode))
-                {
-                    newNode = new Node { Data = c };
-
-                    Nodes[c] = newNode;
-                }
-                newNode.Infos.Add(info);
-            }
-        }
-
+        /// <param name="query"></param>
+        /// <returns>Matched results</returns>
         public SearchResult[] Search(string query)
         {
             LastPerfInfo = new PerfInfo();
-            //_lastPosition = new Dictionary<int, int>();
 
             if (Keywords.Length == 0)
                 return new SearchResult[0];
 
             var timer = HiPerfTimer.StartNew();
+            var lastMatchedPositions = new Dictionary<int, int>();
             var resultList = new Dictionary<int, SearchResult>();
-            //var found = new Dictionary<int, bool>();
 
-            for (int pos = 0; pos < query.Length; pos++)
+            for (var pos = 0; pos < query.Length; pos++)
             {
                 var c = query[pos];
                 Node node;
@@ -226,47 +266,71 @@ namespace TrieCS
                     break;
                 }
 
+                // Clear items in resultList which do not appears in node.
                 FilterOut(resultList, node);
+
+                // whether the result is matched in order.
+                var isInOrder = new Dictionary<int, bool>();
 
                 node.Infos.ForEach(info =>
                 {
                     var index = info.Index;
-                    if (pos != 0)
+                    if (pos == 0)
+                    {
+                        // This is the start point. Only the isInOrder of matched index will be set to true
+                        // to initiate the searching range.
+                        // Since that positions with the same index is added in asc order, I take
+                        // the first one to add to lastMatchedPositions.
+                        isInOrder[index] = true;
+                        if (!lastMatchedPositions.ContainsKey(index))
+                            lastMatchedPositions[index] = info.Position;
+                    }
+                    else
                     {
                         if (!resultList.ContainsKey(index))
                         {
+                            // Not in the last searching range.
                             resultList.Remove(index);
                             return;
                         }
-                        /*else
+                        if (isInOrder.ContainsKey(index) && isInOrder[index])
                         {
-                            if (info.Position > _lastPosition[index])
-                            {
-                                found[index] = true;
-                                _lastPosition[index] = info.Position;
-                            }
-                            else
-                            {
-                                found[index] = false;
-                            }
-                        }*/
+                            // Skip duplicate matched index.
+                            return;
+                        }
+                        if (info.Position > lastMatchedPositions[index])
+                        {
+                            // This matched char is behind the last matched char, which means it's in order.
+                            // Update lastMatchedPositions for next matching.
+                            isInOrder[index] = true;
+                            lastMatchedPositions[index] = info.Position;
+                        }
+                        else
+                        {
+                            // Not in order, which means this matched char is in front of the
+                            // last matched char. So mark it "false".
+                            isInOrder[index] = false;
+                        }
                     }
-                    /*else
-                    {
-                        if (!_lastPosition.ContainsKey(index))
-                            _lastPosition[index] = info.Position;
-                        found[index] = true;
-                    }*/
-                    AddToResult(resultList, info, index);
                 });
+
+                // Add to result list if in order.
+                // Otherwise remove from list.
+                foreach (var info in node.Infos)
+                {
+                    bool inOrder;
+                    if (isInOrder.TryGetValue(info.Index, out inOrder) && inOrder)
+                    {
+                        AddToResult(resultList, info);
+                    }
+                    else
+                    {
+                        resultList.Remove(info.Index);
+                    }
+                }
             }
 
-            /*foreach (var item in found.Where(_=>!_.Value).Select(_=>_.Key))
-            {
-                resultList.Remove(item);
-            }*/
-
-            // increase priority if continues.
+            // other procedures
             var resultArray = PostProcess(resultList);
 
             timer.Stop();
@@ -275,6 +339,11 @@ namespace TrieCS
             return resultArray;
         }
 
+        /// <summary>
+        /// Remove items, which not appears in node.Infos, in resultList
+        /// </summary>
+        /// <param name="resultList"></param>
+        /// <param name="node"></param>
         private static void FilterOut(Dictionary<int, SearchResult> resultList, Node node)
         {
             var lookup = node.Infos.ToLookup(_ => _.Index);
@@ -282,35 +351,45 @@ namespace TrieCS
             dif.ForEach(_ => resultList.Remove(_));
         }
 
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="resultList"></param>
+        /// <returns></returns>
         private static SearchResult[] PostProcess(Dictionary<int, SearchResult> resultList)
         {
             var resultArray = resultList.Values.ToArray();
             foreach (var item in resultArray)
             {
+                // increase priority if continues.
                 if (Continues(item.Positions.Values))
                     item.Priority += 4;
             }
             return resultArray;
         }
 
-        private void AddToResult(Dictionary<int, SearchResult> resultList, MatchInfo info, int index)
+        /// <summary>
+        /// Add <see cref="MatchInfo"/> to resultList
+        /// </summary>
+        /// <param name="resultList"></param>
+        /// <param name="info"></param>
+        private void AddToResult(Dictionary<int, SearchResult> resultList, MatchInfo info)
         {
+            var index = info.Index;
             SearchResult sr;
             if (!resultList.TryGetValue(info.Index, out sr))
             {
                 sr = new SearchResult
                 {
-                    Index = index
+                    Index = index,
+                    Content = Keywords[index]
                 };
                 resultList[index] = sr;
             }
-            sr.Content = Keywords[index];
-            if (!sr.Positions.ContainsKey(info.Position))
-            {
-                sr.Positions.Add(info.Position, info.Position);
-                if (info.Priority > sr.Priority)
-                    sr.Priority = info.Priority;
-            }
+            if (sr.Positions.ContainsKey(info.Position)) return;
+            sr.Positions.Add(info.Position, info.Position);
+            if (info.Priority > sr.Priority)
+                sr.Priority = info.Priority;
         }
 
         /// <summary>
@@ -322,23 +401,20 @@ namespace TrieCS
         {
             var last = list.ElementAt(0);
             var threshold = 3;
-            var found = false;
             foreach (var item in list.Skip(1))
             {
                 if (item != last + 1)
                 {
                     threshold = 3;
                     last = item;
-                    found = false;
                     continue;
                 }
                 last = item;
                 threshold--;
-                found = true;
                 if (threshold == 0)
                     return true;
             }
-            return found;
+            return false;
         }
     }
 }
